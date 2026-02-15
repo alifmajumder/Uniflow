@@ -4,6 +4,7 @@ import FileUpload from './components/FileUpload';
 import ScheduleGrid from './components/ScheduleGrid';
 import TaskManager from './components/TaskManager';
 import Settings from './components/Settings';
+import { ToastContainer, ToastMessage } from './components/Toast';
 import { AppState, ClassSession, Task, AppPreferences } from './types';
 import { loadSchedule, loadTasks, saveSchedule, saveTasks, exportData, loadPreferences, savePreferences, applyTheme, isAppStandalone } from './utils/helpers';
 
@@ -42,6 +43,12 @@ const App: React.FC = () => {
   const [permissionStatus, setPermissionStatus] = useState<NotificationPermission>('default');
   const [isStandalone, setIsStandalone] = useState(false);
   
+  // Install Prompt State
+  const [dismissedInstallPrompt, setDismissedInstallPrompt] = useState(false);
+
+  // Toast State
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
   const notifiedClassesRef = useRef<Set<string>>(new Set());
 
   // Load data
@@ -59,9 +66,12 @@ const App: React.FC = () => {
     // Check PWA status
     setIsStandalone(isAppStandalone());
     
-    // Check permission
-    if ('Notification' in window) {
+    // Check permission safely
+    if (typeof window !== 'undefined' && 'Notification' in window) {
       setPermissionStatus(Notification.permission);
+    } else {
+      // If API missing, we default to 'default' but handle it gracefully later
+      setPermissionStatus('default');
     }
   }, []);
 
@@ -79,47 +89,81 @@ const App: React.FC = () => {
     applyTheme(state.preferences.themeId);
   }, [state.preferences]);
 
+  // --- Notification Logic ---
+
+  const addToast = (title: string, message: string) => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts(prev => [...prev, { id, title, message }]);
+    // Auto dismiss after 5 seconds
+    setTimeout(() => removeToast(id), 5000);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  const notifyUser = (title: string, body: string) => {
+    // 1. Try Native System Notification
+    let nativeSent = false;
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try {
+        // Simple native notification
+        new Notification(title, { body });
+        nativeSent = true;
+      } catch (e) {
+        console.warn("System notification failed, falling back to toast", e);
+      }
+    }
+
+    // 2. Fallback to In-App Toast if native failed or not supported, OR if app is currently focused (to ensure visibility)
+    if (!nativeSent || document.visibilityState === 'visible') {
+      addToast(title, body);
+    }
+  };
+
   // Request Permission Explicitly
   const requestPermission = async () => {
+    // Case 1: Browser/WebView does not support Notification API
     if (!('Notification' in window)) {
-      alert("This browser does not support desktop notifications");
+      // We simulate 'granted' so the switch turns on and internal logic works
+      // But we inform the user via toast
+      updatePreferences({ enableNotifications: true });
+      // We artificially set it to granted to unlock the UI
+      setPermissionStatus('granted'); 
+      addToast("In-App Notifications Enabled", "System notifications are not supported on this device, but you will receive in-app alerts.");
       return;
     }
 
+    // Case 2: Standard Flow
     try {
       const result = await Notification.requestPermission();
       setPermissionStatus(result);
 
       if (result === 'granted') {
-        new Notification("UniFlow Notifications Enabled", {
-          body: "You will now receive alerts for classes and tasks!",
-          // Removed tag to prevent potential issues on some devices
-        });
+        notifyUser("UniFlow Notifications Enabled", "You will now receive alerts for classes and tasks!");
         updatePreferences({ enableNotifications: true });
+      } else {
+        alert("Permission was denied. Please enable it in your device settings.");
       }
     } catch (e) {
       console.error("Permission request failed", e);
+      // Fallback behavior on error
+      updatePreferences({ enableNotifications: true });
+      setPermissionStatus('granted'); 
+      addToast("Notifications Enabled", "Using in-app alerts due to system restriction.");
     }
   };
   
   const sendTestNotification = () => {
-      if (permissionStatus === 'granted') {
-          try {
-              new Notification("Test Notification", {
-                  body: "This is a test to confirm notifications are working on your device."
-              });
-          } catch (e) {
-              alert("Error sending notification: " + e);
-          }
-      } else {
-          alert("Permission not granted yet.");
-      }
+    notifyUser("Test Notification", "This is a test to confirm notifications are working.");
   };
 
-  // Notification Logic
+  // Reminder Interval
   useEffect(() => {
-    // If master switch is off, or permission not granted, do nothing
-    if (!state.preferences.enableNotifications || permissionStatus !== 'granted') return;
+    // If master switch is off, do nothing. 
+    // Note: We run this even if permissionStatus != 'granted' if the API is missing, 
+    // because we want In-App toasts to work.
+    if (!state.preferences.enableNotifications) return;
 
     const checkReminders = () => {
       const now = new Date();
@@ -142,14 +186,8 @@ const App: React.FC = () => {
 
             // Notify 30 minutes before class
             if (diff === 30 && !notifiedClassesRef.current.has(notificationId)) {
-              try {
-                new Notification(`Class Reminder: ${session.courseCode}`, {
-                  body: `${session.courseName} starts in 30 minutes at ${session.room}.`
-                });
-                notifiedClassesRef.current.add(notificationId);
-              } catch (e) {
-                console.error("Notification failed", e);
-              }
+              notifyUser(`Class Reminder: ${session.courseCode}`, `${session.courseName} starts in 30 minutes at ${session.room}.`);
+              notifiedClassesRef.current.add(notificationId);
             }
           });
       }
@@ -167,12 +205,8 @@ const App: React.FC = () => {
            if (diff >= 0 && diff < 60000) {
              const id = `${notificationBaseId}-${idSuffix}`;
              if (!notifiedClassesRef.current.has(id)) {
-                try {
-                   new Notification(title, { body });
-                   notifiedClassesRef.current.add(id);
-                } catch (e) {
-                   console.error("Notification failed", e);
-                }
+                notifyUser(title, body);
+                notifiedClassesRef.current.add(id);
              }
            }
         };
@@ -202,7 +236,7 @@ const App: React.FC = () => {
 
     const interval = setInterval(checkReminders, 60000); 
     return () => clearInterval(interval);
-  }, [state.schedule, state.tasks, state.preferences, permissionStatus]);
+  }, [state.schedule, state.tasks, state.preferences]);
 
   const updateSchedule = (newSchedule: ClassSession[]) => {
     setState(prev => ({ ...prev, schedule: newSchedule }));
@@ -255,7 +289,7 @@ const App: React.FC = () => {
   };
 
   const handleMasterToggle = () => {
-    if (!state.preferences.enableNotifications && permissionStatus !== 'granted') {
+    if (!state.preferences.enableNotifications) {
         requestPermission();
     } else {
         updatePreferences({ enableNotifications: !state.preferences.enableNotifications });
@@ -279,13 +313,19 @@ const App: React.FC = () => {
     setActiveTab('schedule');
   };
 
-  // Determine if we should show the install prompt or the permission prompt
-  const showInstallPrompt = !isStandalone && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  const showPermissionBanner = isStandalone && permissionStatus === 'default';
+  // Determine if we should show the install prompt
+  // If dismissed or if standalone, don't show.
+  const showInstallPrompt = !dismissedInstallPrompt && !isStandalone && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  
+  // Show permission banner if app is installed (or dismissed prompt) and permission is default
+  const showPermissionBanner = (isStandalone || dismissedInstallPrompt) && permissionStatus === 'default' && 'Notification' in window;
 
   return (
     <div className="h-screen bg-slate-950 text-slate-100 flex flex-col font-sans transition-colors duration-500 overflow-hidden">
       
+      {/* Toast Container */}
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
+
       {/* Navbar */}
       <nav className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50 flex-none h-20">
         <div className="max-w-7xl mx-auto px-4 h-full flex items-center justify-between">
@@ -303,13 +343,13 @@ const App: React.FC = () => {
             <button
               onClick={() => setShowNotificationSettings(true)}
               className={`p-2 rounded-full transition-all duration-300 relative group ${
-                state.preferences.enableNotifications && permissionStatus === 'granted'
+                state.preferences.enableNotifications
                   ? 'text-primary-400 bg-primary-500/10 hover:bg-primary-500/20' 
                   : 'text-slate-500 hover:text-slate-300'
               }`}
               title="Notification Settings"
             >
-              {state.preferences.enableNotifications && permissionStatus === 'granted' ? (
+              {state.preferences.enableNotifications ? (
                  <>
                    <Bell className="w-5 h-5" />
                    <span className="absolute top-2 right-2.5 w-1.5 h-1.5 bg-primary-500 rounded-full animate-pulse"></span>
@@ -332,7 +372,7 @@ const App: React.FC = () => {
       {/* Main Content Area */}
       <main className={`flex-1 max-w-7xl mx-auto w-full p-4 md:p-6 pb-28 ${activeTab === 'tasks' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
         
-        {/* Permission Banner (Only if Installed) */}
+        {/* Permission Banner */}
         {showPermissionBanner && (
           <div className="mb-6 p-4 bg-primary-600 rounded-xl shadow-lg shadow-primary-900/50 flex items-center justify-between animate-in slide-in-from-top-4">
              <div className="flex items-center gap-3">
@@ -353,27 +393,30 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Install Prompt (Only if Mobile and NOT installed) */}
-        {showInstallPrompt && permissionStatus !== 'granted' && (
-           <div className="mb-6 p-4 bg-slate-800 rounded-xl border border-slate-700 flex items-center gap-4 animate-in slide-in-from-top-4">
-              <div className="p-2 bg-slate-700 rounded-lg">
+        {/* Install Prompt (Dismissible) */}
+        {showInstallPrompt && (
+           <div className="mb-6 p-4 bg-slate-800 rounded-xl border border-slate-700 flex items-start gap-4 animate-in slide-in-from-top-4 relative group">
+              <button 
+                onClick={() => setDismissedInstallPrompt(true)}
+                className="absolute top-2 right-2 p-1 text-slate-500 hover:text-white transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <div className="p-2 bg-slate-700 rounded-lg mt-1">
                  <Smartphone className="w-6 h-6 text-slate-300" />
               </div>
-              <div className="flex-1">
+              <div className="flex-1 pr-6">
                  <h3 className="font-bold text-slate-200">Install App to Enable Alerts</h3>
-                 <p className="text-slate-400 text-xs mt-1">
-                    Notifications are disabled in browser mode. Add to Home Screen to enable them.
+                 <p className="text-slate-400 text-xs mt-1 mb-2">
+                    For the best experience, add this app to your home screen.
                  </p>
+                 <button 
+                    onClick={() => setDismissedInstallPrompt(true)} 
+                    className="text-xs font-bold text-primary-400 hover:text-primary-300"
+                 >
+                    I already have it / Dismiss
+                 </button>
               </div>
-           </div>
-        )}
-
-        {permissionStatus === 'denied' && state.preferences.enableNotifications && (
-           <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 text-red-400" />
-              <p className="text-sm text-red-200">
-                Notifications are blocked. Please enable them in your device settings.
-              </p>
            </div>
         )}
 
@@ -464,18 +507,20 @@ const App: React.FC = () => {
                   {/* Master Switch */}
                   <div className="flex items-center justify-between p-4 bg-primary-500/10 border border-primary-500/20 rounded-xl">
                       <div className="flex flex-col">
-                          <span className="font-bold text-white text-sm">Enable All Notifications</span>
-                          <span className="text-xs text-primary-200/70">Master switch for all alerts</span>
+                          <span className="font-bold text-white text-sm">Enable Notifications</span>
+                          <span className="text-xs text-primary-200/70">
+                            {('Notification' in window) ? 'System & In-App Alerts' : 'In-App Alerts Only (System Unsupported)'}
+                          </span>
                       </div>
                       <button 
                         onClick={handleMasterToggle}
-                        className={`w-12 h-6 rounded-full p-1 transition-colors duration-200 ease-in-out ${state.preferences.enableNotifications && permissionStatus === 'granted' ? 'bg-primary-500' : 'bg-slate-700'}`}
+                        className={`w-12 h-6 rounded-full p-1 transition-colors duration-200 ease-in-out ${state.preferences.enableNotifications ? 'bg-primary-500' : 'bg-slate-700'}`}
                       >
-                         <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-200 ${state.preferences.enableNotifications && permissionStatus === 'granted' ? 'translate-x-6' : 'translate-x-0'}`} />
+                         <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-200 ${state.preferences.enableNotifications ? 'translate-x-6' : 'translate-x-0'}`} />
                       </button>
                   </div>
 
-                  {permissionStatus === 'granted' && (
+                  {state.preferences.enableNotifications && (
                       <button 
                           onClick={sendTestNotification}
                           className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium transition-colors border border-slate-700"
@@ -487,7 +532,7 @@ const App: React.FC = () => {
                   {permissionStatus === 'denied' && (
                      <div className="p-3 bg-red-500/20 border border-red-500/30 rounded-lg text-xs text-red-200 flex gap-2">
                         <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                        <span>Permission denied in browser settings. Please enable them manually.</span>
+                        <span>Permission denied in settings. Notifications will only appear inside the app.</span>
                      </div>
                   )}
 
