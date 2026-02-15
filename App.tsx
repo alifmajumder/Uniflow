@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { LayoutDashboard, ListTodo, Settings as SettingsIcon, Bell, BellOff, Moon, X, Check, Calendar, Clock, AlertCircle } from 'lucide-react';
+import { LayoutDashboard, ListTodo, Settings as SettingsIcon, Bell, BellOff, Moon, X, Check, Calendar, Clock, AlertCircle, BellRing } from 'lucide-react';
 import FileUpload from './components/FileUpload';
 import ScheduleGrid from './components/ScheduleGrid';
 import TaskManager from './components/TaskManager';
@@ -39,6 +39,7 @@ const App: React.FC = () => {
     }
   });
   const [showNotificationSettings, setShowNotificationSettings] = useState(false);
+  const [permissionStatus, setPermissionStatus] = useState<NotificationPermission>(Notification.permission);
   
   const notifiedClassesRef = useRef<Set<string>>(new Set());
 
@@ -55,6 +56,13 @@ const App: React.FC = () => {
     applyTheme(prefs.themeId);
   }, []);
 
+  // Update permission status on mount
+  useEffect(() => {
+    if ('Notification' in window) {
+      setPermissionStatus(Notification.permission);
+    }
+  }, []);
+
   // Persistence
   useEffect(() => {
     saveSchedule(state.schedule);
@@ -69,14 +77,31 @@ const App: React.FC = () => {
     applyTheme(state.preferences.themeId);
   }, [state.preferences]);
 
+  // Request Permission Explicitly
+  const requestPermission = async () => {
+    if (!('Notification' in window)) {
+      alert("This browser does not support desktop notifications");
+      return;
+    }
+
+    const result = await Notification.requestPermission();
+    setPermissionStatus(result);
+
+    if (result === 'granted') {
+      new Notification("UniFlow Notifications Enabled", {
+        body: "You will now receive alerts for classes and tasks!",
+        icon: '/favicon.ico'
+      });
+      updatePreferences({ enableNotifications: true });
+    }
+  };
+
   // Notification Logic
   useEffect(() => {
-    // If master switch is off, do nothing
-    if (!state.preferences.enableNotifications) return;
+    // If master switch is off, or permission not granted, do nothing
+    if (!state.preferences.enableNotifications || permissionStatus !== 'granted') return;
 
     const checkReminders = () => {
-      if (Notification.permission !== 'granted') return;
-
       const now = new Date();
       
       // --- Class Schedule Reminders (30 mins before) ---
@@ -97,11 +122,16 @@ const App: React.FC = () => {
 
             // Notify 30 minutes before class
             if (diff === 30 && !notifiedClassesRef.current.has(notificationId)) {
-              new Notification(`Class Reminder: ${session.courseCode}`, {
-                body: `${session.courseName} starts in 30 minutes at ${session.room}.`,
-                icon: '/favicon.ico'
-              });
-              notifiedClassesRef.current.add(notificationId);
+              try {
+                new Notification(`Class Reminder: ${session.courseCode}`, {
+                  body: `${session.courseName} starts in 30 minutes at ${session.room}.`,
+                  icon: '/favicon.ico',
+                  tag: notificationId // Prevent duplicate notifications on some browsers
+                });
+                notifiedClassesRef.current.add(notificationId);
+              } catch (e) {
+                console.error("Notification failed", e);
+              }
             }
           });
       }
@@ -119,8 +149,12 @@ const App: React.FC = () => {
            if (diff >= 0 && diff < 60000) {
              const id = `${notificationBaseId}-${idSuffix}`;
              if (!notifiedClassesRef.current.has(id)) {
-               new Notification(title, { body, icon: '/favicon.ico' });
-               notifiedClassesRef.current.add(id);
+                try {
+                   new Notification(title, { body, icon: '/favicon.ico', tag: id });
+                   notifiedClassesRef.current.add(id);
+                } catch (e) {
+                   console.error("Notification failed", e);
+                }
              }
            }
         };
@@ -150,7 +184,7 @@ const App: React.FC = () => {
 
     const interval = setInterval(checkReminders, 60000); 
     return () => clearInterval(interval);
-  }, [state.schedule, state.tasks, state.preferences]);
+  }, [state.schedule, state.tasks, state.preferences, permissionStatus]);
 
   const updateSchedule = (newSchedule: ClassSession[]) => {
     setState(prev => ({ ...prev, schedule: newSchedule }));
@@ -203,12 +237,8 @@ const App: React.FC = () => {
   };
 
   const handleMasterToggle = () => {
-    if (!state.preferences.enableNotifications && Notification.permission !== 'granted') {
-        Notification.requestPermission().then(perm => {
-            if (perm === 'granted') {
-                updatePreferences({ enableNotifications: true });
-            }
-        });
+    if (!state.preferences.enableNotifications && permissionStatus !== 'granted') {
+        requestPermission();
     } else {
         updatePreferences({ enableNotifications: !state.preferences.enableNotifications });
     }
@@ -251,13 +281,13 @@ const App: React.FC = () => {
             <button
               onClick={() => setShowNotificationSettings(true)}
               className={`p-2 rounded-full transition-all duration-300 relative group ${
-                state.preferences.enableNotifications 
+                state.preferences.enableNotifications && permissionStatus === 'granted'
                   ? 'text-primary-400 bg-primary-500/10 hover:bg-primary-500/20' 
                   : 'text-slate-500 hover:text-slate-300'
               }`}
               title="Notification Settings"
             >
-              {state.preferences.enableNotifications ? (
+              {state.preferences.enableNotifications && permissionStatus === 'granted' ? (
                  <>
                    <Bell className="w-5 h-5" />
                    <span className="absolute top-2 right-2.5 w-1.5 h-1.5 bg-primary-500 rounded-full animate-pulse"></span>
@@ -278,9 +308,38 @@ const App: React.FC = () => {
       </nav>
 
       {/* Main Content Area */}
-      {/* Logic: Tasks handles its own scrolling (overflow-hidden on parent). Routine/Settings scroll the page (overflow-y-auto on parent). */}
       <main className={`flex-1 max-w-7xl mx-auto w-full p-4 md:p-6 pb-28 ${activeTab === 'tasks' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
         
+        {/* Permission Banner */}
+        {permissionStatus === 'default' && (
+          <div className="mb-6 p-4 bg-primary-600 rounded-xl shadow-lg shadow-primary-900/50 flex items-center justify-between animate-in slide-in-from-top-4">
+             <div className="flex items-center gap-3">
+               <div className="p-2 bg-white/20 rounded-lg">
+                 <BellRing className="w-6 h-6 text-white" />
+               </div>
+               <div>
+                 <h3 className="font-bold text-white">Enable Notifications</h3>
+                 <p className="text-primary-100 text-sm">Get alerts for upcoming classes and deadlines.</p>
+               </div>
+             </div>
+             <button 
+               onClick={requestPermission}
+               className="px-4 py-2 bg-white text-primary-600 font-bold rounded-lg hover:bg-primary-50 transition-colors text-sm"
+             >
+               Allow
+             </button>
+          </div>
+        )}
+
+        {permissionStatus === 'denied' && state.preferences.enableNotifications && (
+           <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3">
+              <AlertCircle className="w-5 h-5 text-red-400" />
+              <p className="text-sm text-red-200">
+                Notifications are blocked by your browser. Please enable them in your browser settings to receive alerts.
+              </p>
+           </div>
+        )}
+
         {activeTab === 'schedule' && (
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {state.schedule.length === 0 ? (
@@ -373,11 +432,18 @@ const App: React.FC = () => {
                       </div>
                       <button 
                         onClick={handleMasterToggle}
-                        className={`w-12 h-6 rounded-full p-1 transition-colors duration-200 ease-in-out ${state.preferences.enableNotifications ? 'bg-primary-500' : 'bg-slate-700'}`}
+                        className={`w-12 h-6 rounded-full p-1 transition-colors duration-200 ease-in-out ${state.preferences.enableNotifications && permissionStatus === 'granted' ? 'bg-primary-500' : 'bg-slate-700'}`}
                       >
-                         <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-200 ${state.preferences.enableNotifications ? 'translate-x-6' : 'translate-x-0'}`} />
+                         <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-200 ${state.preferences.enableNotifications && permissionStatus === 'granted' ? 'translate-x-6' : 'translate-x-0'}`} />
                       </button>
                   </div>
+
+                  {permissionStatus === 'denied' && (
+                     <div className="p-3 bg-red-500/20 border border-red-500/30 rounded-lg text-xs text-red-200 flex gap-2">
+                        <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                        <span>Permission denied in browser settings. Please enable them manually.</span>
+                     </div>
+                  )}
 
                   <div className={`space-y-1 transition-opacity duration-300 ${!state.preferences.enableNotifications ? 'opacity-50 pointer-events-none' : ''}`}>
                       <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Granular Controls</h4>
