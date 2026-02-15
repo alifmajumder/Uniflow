@@ -8,11 +8,12 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       // If a window is already open, focus it
       for (const client of clientList) {
-        if (client.url === '/' && 'focus' in client) {
+        if ('focus' in client) {
           return client.focus();
         }
       }

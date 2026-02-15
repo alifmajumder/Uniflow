@@ -39,6 +39,7 @@ const App: React.FC = () => {
     }
   });
   const [showNotificationSettings, setShowNotificationSettings] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<NotificationPermission>('default');
   const [isStandalone, setIsStandalone] = useState(false);
   
@@ -70,6 +71,12 @@ const App: React.FC = () => {
     // Check existing permission
     if ('Notification' in window) {
       setPermissionStatus(Notification.permission);
+      
+      // Check for Welcome Modal
+      const seen = localStorage.getItem('unisync_welcome_seen');
+      if (!seen && Notification.permission !== 'granted') {
+        setShowWelcome(true);
+      }
     }
   }, []);
 
@@ -90,11 +97,17 @@ const App: React.FC = () => {
     if ('serviceWorker' in navigator) {
       try {
         const registration = await navigator.serviceWorker.ready;
+        // Using 'renotify: true' and 'tag' is crucial for mobile lock screen alerts
+        // 'requireInteraction: true' keeps it on screen until dismissed
         await registration.showNotification(title, {
           body,
-          icon: '/vite.svg', // Ensure you have an icon or remove this line
+          icon: '/vite.svg', 
           vibrate: [200, 100, 200],
-          badge: '/vite.svg'
+          badge: '/vite.svg',
+          tag: 'uniflow-alert',
+          renotify: true,
+          requireInteraction: true,
+          data: { url: window.location.href }
         } as any);
         return;
       } catch (e) {
@@ -132,6 +145,15 @@ const App: React.FC = () => {
 
   const sendTestNotification = () => {
     notifyUser("Test Notification", "This is a test alert from UniFlow.");
+  };
+
+  const handleWelcomeAction = async (allow: boolean) => {
+    localStorage.setItem('unisync_welcome_seen', 'true');
+    setShowWelcome(false);
+    
+    if (allow) {
+      await requestPermission();
+    }
   };
 
   // Reminder Logic
@@ -251,7 +273,8 @@ const App: React.FC = () => {
   // 1. It is a standalone app (APK/PWA)
   // 2. Permission is not yet granted
   // 3. Notification API exists
-  const showPermissionBanner = isStandalone && permissionStatus === 'default' && 'Notification' in window;
+  // 4. Welcome modal is NOT showing (to avoid double banners)
+  const showPermissionBanner = !showWelcome && isStandalone && permissionStatus === 'default' && 'Notification' in window;
 
   // Logic: Show install prompt only if NOT standalone (browser)
   // But user asked to remove "In app alert". I'll keep this as a passive banner, 
@@ -399,6 +422,33 @@ const App: React.FC = () => {
           <TabButton active={activeTab === 'tasks'} onClick={() => setActiveTab('tasks')} icon={ListTodo} label="Tasks" />
         </nav>
       </div>
+
+      {/* Welcome / Permission Modal */}
+      {showWelcome && (
+       <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm shadow-2xl p-6 flex flex-col items-center text-center animate-in slide-in-from-bottom-4 duration-300">
+             <div className="w-16 h-16 bg-primary-500/20 rounded-full flex items-center justify-center mb-4 ring-4 ring-primary-500/10">
+                <BellRing className="w-8 h-8 text-primary-400" />
+             </div>
+             <h2 className="text-xl font-bold text-white mb-2">Never Miss a Class</h2>
+             <p className="text-slate-400 text-sm mb-6 leading-relaxed">
+               Allow notifications to get timely reminders for your classes and task deadlines, even when the app is in the background.
+             </p>
+             <button 
+               onClick={() => handleWelcomeAction(true)}
+               className="w-full py-3 bg-primary-600 hover:bg-primary-500 text-white font-bold rounded-xl shadow-lg shadow-primary-500/20 transition-all active:scale-95 mb-3"
+             >
+               Enable Notifications
+             </button>
+             <button 
+               onClick={() => handleWelcomeAction(false)}
+               className="text-slate-500 hover:text-slate-300 text-sm font-medium p-2 transition-colors"
+             >
+               Skip for now
+             </button>
+          </div>
+       </div>
+      )}
 
       {/* Notification Settings Modal */}
       {showNotificationSettings && (
