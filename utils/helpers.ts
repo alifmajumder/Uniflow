@@ -116,6 +116,13 @@ export const exportData = (schedule: ClassSession[], tasks: Task[]) => {
   URL.revokeObjectURL(url);
 };
 
+// Check if app is running in standalone mode (PWA)
+export const isAppStandalone = (): boolean => {
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+  const isIOSStandalone = (window.navigator as any).standalone === true;
+  return isStandalone || isIOSStandalone;
+};
+
 // THEMES
 export const themes: Theme[] = [
   {

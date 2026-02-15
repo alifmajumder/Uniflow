@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { LayoutDashboard, ListTodo, Settings as SettingsIcon, Bell, BellOff, Moon, X, Check, Calendar, Clock, AlertCircle, BellRing } from 'lucide-react';
+import { LayoutDashboard, ListTodo, Settings as SettingsIcon, Bell, BellOff, Moon, X, Check, Calendar, Clock, AlertCircle, BellRing, Smartphone } from 'lucide-react';
 import FileUpload from './components/FileUpload';
 import ScheduleGrid from './components/ScheduleGrid';
 import TaskManager from './components/TaskManager';
 import Settings from './components/Settings';
 import { AppState, ClassSession, Task, AppPreferences } from './types';
-import { loadSchedule, loadTasks, saveSchedule, saveTasks, exportData, loadPreferences, savePreferences, applyTheme } from './utils/helpers';
+import { loadSchedule, loadTasks, saveSchedule, saveTasks, exportData, loadPreferences, savePreferences, applyTheme, isAppStandalone } from './utils/helpers';
 
 const TabButton = ({ active, onClick, icon: Icon, label }: any) => (
   <button
@@ -39,7 +39,8 @@ const App: React.FC = () => {
     }
   });
   const [showNotificationSettings, setShowNotificationSettings] = useState(false);
-  const [permissionStatus, setPermissionStatus] = useState<NotificationPermission>(Notification.permission);
+  const [permissionStatus, setPermissionStatus] = useState<NotificationPermission>('default');
+  const [isStandalone, setIsStandalone] = useState(false);
   
   const notifiedClassesRef = useRef<Set<string>>(new Set());
 
@@ -54,10 +55,11 @@ const App: React.FC = () => {
     
     // Apply theme on initial load
     applyTheme(prefs.themeId);
-  }, []);
-
-  // Update permission status on mount
-  useEffect(() => {
+    
+    // Check PWA status
+    setIsStandalone(isAppStandalone());
+    
+    // Check permission
     if ('Notification' in window) {
       setPermissionStatus(Notification.permission);
     }
@@ -84,16 +86,34 @@ const App: React.FC = () => {
       return;
     }
 
-    const result = await Notification.requestPermission();
-    setPermissionStatus(result);
+    try {
+      const result = await Notification.requestPermission();
+      setPermissionStatus(result);
 
-    if (result === 'granted') {
-      new Notification("UniFlow Notifications Enabled", {
-        body: "You will now receive alerts for classes and tasks!",
-        icon: '/favicon.ico'
-      });
-      updatePreferences({ enableNotifications: true });
+      if (result === 'granted') {
+        new Notification("UniFlow Notifications Enabled", {
+          body: "You will now receive alerts for classes and tasks!",
+          // Removed tag to prevent potential issues on some devices
+        });
+        updatePreferences({ enableNotifications: true });
+      }
+    } catch (e) {
+      console.error("Permission request failed", e);
     }
+  };
+  
+  const sendTestNotification = () => {
+      if (permissionStatus === 'granted') {
+          try {
+              new Notification("Test Notification", {
+                  body: "This is a test to confirm notifications are working on your device."
+              });
+          } catch (e) {
+              alert("Error sending notification: " + e);
+          }
+      } else {
+          alert("Permission not granted yet.");
+      }
   };
 
   // Notification Logic
@@ -124,9 +144,7 @@ const App: React.FC = () => {
             if (diff === 30 && !notifiedClassesRef.current.has(notificationId)) {
               try {
                 new Notification(`Class Reminder: ${session.courseCode}`, {
-                  body: `${session.courseName} starts in 30 minutes at ${session.room}.`,
-                  icon: '/favicon.ico',
-                  tag: notificationId // Prevent duplicate notifications on some browsers
+                  body: `${session.courseName} starts in 30 minutes at ${session.room}.`
                 });
                 notifiedClassesRef.current.add(notificationId);
               } catch (e) {
@@ -150,7 +168,7 @@ const App: React.FC = () => {
              const id = `${notificationBaseId}-${idSuffix}`;
              if (!notifiedClassesRef.current.has(id)) {
                 try {
-                   new Notification(title, { body, icon: '/favicon.ico', tag: id });
+                   new Notification(title, { body });
                    notifiedClassesRef.current.add(id);
                 } catch (e) {
                    console.error("Notification failed", e);
@@ -261,6 +279,10 @@ const App: React.FC = () => {
     setActiveTab('schedule');
   };
 
+  // Determine if we should show the install prompt or the permission prompt
+  const showInstallPrompt = !isStandalone && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  const showPermissionBanner = isStandalone && permissionStatus === 'default';
+
   return (
     <div className="h-screen bg-slate-950 text-slate-100 flex flex-col font-sans transition-colors duration-500 overflow-hidden">
       
@@ -310,8 +332,8 @@ const App: React.FC = () => {
       {/* Main Content Area */}
       <main className={`flex-1 max-w-7xl mx-auto w-full p-4 md:p-6 pb-28 ${activeTab === 'tasks' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
         
-        {/* Permission Banner */}
-        {permissionStatus === 'default' && (
+        {/* Permission Banner (Only if Installed) */}
+        {showPermissionBanner && (
           <div className="mb-6 p-4 bg-primary-600 rounded-xl shadow-lg shadow-primary-900/50 flex items-center justify-between animate-in slide-in-from-top-4">
              <div className="flex items-center gap-3">
                <div className="p-2 bg-white/20 rounded-lg">
@@ -331,11 +353,26 @@ const App: React.FC = () => {
           </div>
         )}
 
+        {/* Install Prompt (Only if Mobile and NOT installed) */}
+        {showInstallPrompt && permissionStatus !== 'granted' && (
+           <div className="mb-6 p-4 bg-slate-800 rounded-xl border border-slate-700 flex items-center gap-4 animate-in slide-in-from-top-4">
+              <div className="p-2 bg-slate-700 rounded-lg">
+                 <Smartphone className="w-6 h-6 text-slate-300" />
+              </div>
+              <div className="flex-1">
+                 <h3 className="font-bold text-slate-200">Install App to Enable Alerts</h3>
+                 <p className="text-slate-400 text-xs mt-1">
+                    Notifications are disabled in browser mode. Add to Home Screen to enable them.
+                 </p>
+              </div>
+           </div>
+        )}
+
         {permissionStatus === 'denied' && state.preferences.enableNotifications && (
            <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3">
               <AlertCircle className="w-5 h-5 text-red-400" />
               <p className="text-sm text-red-200">
-                Notifications are blocked by your browser. Please enable them in your browser settings to receive alerts.
+                Notifications are blocked. Please enable them in your device settings.
               </p>
            </div>
         )}
@@ -437,6 +474,15 @@ const App: React.FC = () => {
                          <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-200 ${state.preferences.enableNotifications && permissionStatus === 'granted' ? 'translate-x-6' : 'translate-x-0'}`} />
                       </button>
                   </div>
+
+                  {permissionStatus === 'granted' && (
+                      <button 
+                          onClick={sendTestNotification}
+                          className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium transition-colors border border-slate-700"
+                      >
+                          Send Test Notification
+                      </button>
+                  )}
 
                   {permissionStatus === 'denied' && (
                      <div className="p-3 bg-red-500/20 border border-red-500/30 rounded-lg text-xs text-red-200 flex gap-2">
