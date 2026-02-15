@@ -116,11 +116,25 @@ export const exportData = (schedule: ClassSession[], tasks: Task[]) => {
   URL.revokeObjectURL(url);
 };
 
-// Check if app is running in standalone mode (PWA)
+// Check if app is running in standalone mode (PWA, TWA, or WebView)
 export const isAppStandalone = (): boolean => {
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+  // 1. Standard PWA display modes
+  const mqStandalone = window.matchMedia('(display-mode: standalone)').matches;
+  const mqFullscreen = window.matchMedia('(display-mode: fullscreen)').matches;
+  const mqMinimalUi = window.matchMedia('(display-mode: minimal-ui)').matches;
+  
+  // 2. iOS Safari standalone
   const isIOSStandalone = (window.navigator as any).standalone === true;
-  return isStandalone || isIOSStandalone;
+  
+  // 3. Android TWA (Trusted Web Activity) often has this referrer
+  const isTWA = document.referrer.includes('android-app://');
+  
+  // 4. Android WebView detection via User Agent (Look for 'wv' or 'Version/* Chrome/*')
+  // Many wrappers inject 'wv' into the UA string.
+  const userAgent = navigator.userAgent || '';
+  const isAndroidWebView = /wv|WebView/i.test(userAgent) && /Android/i.test(userAgent);
+
+  return mqStandalone || mqFullscreen || mqMinimalUi || isIOSStandalone || isTWA || isAndroidWebView;
 };
 
 // THEMES
