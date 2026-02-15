@@ -1,0 +1,5 @@
+{
+  "name": "UniFlow - Smart Routine Scheduler",
+  "description": "A smart university routine scheduler that extracts schedules from PDFs, manages tasks, and sends class reminders.",
+  "requestFramePermissions": []
+}

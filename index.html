@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UniFlow - Smart Scheduler</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        /* Default Blue (Sky/Blue mix) */
+        --p-50: 240 249 255;
+        --p-100: 224 242 254;
+        --p-200: 186 230 253;
+        --p-300: 125 211 252;
+        --p-400: 56 189 248;
+        --p-500: 14 165 233;
+        --p-600: 2 132 199;
+        --p-700: 3 105 161;
+        --p-800: 7 89 133;
+        --p-900: 12 74 110;
+      }
+      
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #0f172a; 
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #334155; 
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #475569; 
+      }
+
+      .glass-card {
+        background: rgba(15, 23, 42, 0.6);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+    </style>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              display: ['Space Grotesk', 'sans-serif'],
+            },
+            colors: {
+              primary: {
+                50: 'rgb(var(--p-50) / <alpha-value>)',
+                100: 'rgb(var(--p-100) / <alpha-value>)',
+                200: 'rgb(var(--p-200) / <alpha-value>)',
+                300: 'rgb(var(--p-300) / <alpha-value>)',
+                400: 'rgb(var(--p-400) / <alpha-value>)',
+                500: 'rgb(var(--p-500) / <alpha-value>)',
+                600: 'rgb(var(--p-600) / <alpha-value>)',
+                700: 'rgb(var(--p-700) / <alpha-value>)',
+                800: 'rgb(var(--p-800) / <alpha-value>)',
+                900: 'rgb(var(--p-900) / <alpha-value>)',
+              },
+              accent: {
+                500: '#8b5cf6', // Violet
+                600: '#7c3aed',
+              }
+            },
+            animation: {
+              'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'float': 'float 6s ease-in-out infinite',
+            },
+            keyframes: {
+              float: {
+                '0%, 100%': { transform: 'translateY(0)' },
+                '50%': { transform: 'translateY(-10px)' },
+              }
+            }
+          },
+        },
+      }
+    </script>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.564.0",
+    "@google/genai": "https://esm.sh/@google/genai@^1.41.0",
+    "react": "https://esm.sh/react@^19.2.4",
+    "react/": "https://esm.sh/react@^19.2.4/"
+  }
+}
+</script>
+</head>
+  <body class="bg-slate-950 text-slate-100 font-sans antialiased overflow-hidden selection:bg-primary-500/30">
+    <div id="root"></div>
+  </body>
+</html>
