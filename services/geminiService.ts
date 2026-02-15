@@ -1,8 +1,14 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
 const getClient = () => {
+  // Access the key which is injected by Vite at build time
   const apiKey = process.env.API_KEY;
-  if (!apiKey) throw new Error("API Key not found in environment");
+  
+  if (!apiKey) {
+    console.error("CRITICAL ERROR: process.env.API_KEY is undefined.");
+    throw new Error("API Key is missing. Check Vercel Environment Variables and Redeploy.");
+  }
+  
   return new GoogleGenAI({ apiKey });
 };
 

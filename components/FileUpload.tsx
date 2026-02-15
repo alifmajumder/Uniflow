@@ -50,12 +50,18 @@ const FileUpload: React.FC<FileUploadProps> = ({ onScheduleParsed }) => {
       setStatus({ isProcessing: false, error: null, message: 'Success!' });
     } catch (error: any) {
       console.error(error);
-      // Show the actual error message if available
-      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-      const displayError = errorMessage.includes("API Key") 
-        ? "API Key missing. Please check Vercel environment variables." 
-        : `Failed to process PDF: ${errorMessage}`;
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
       
+      let displayError = `Failed: ${errorMessage}`;
+      
+      if (errorMessage.includes("API Key")) {
+        displayError = "API Key missing. Check Vercel Environment Variables.";
+      } else if (errorMessage.includes("Failed to fetch")) {
+        displayError = "Network Error: Could not reach Google AI. Check your internet connection.";
+      } else if (errorMessage.includes("400")) {
+        displayError = "Bad Request. The PDF might be corrupted or too large.";
+      }
+
       setStatus({ isProcessing: false, error: displayError, message: '' });
     }
   };
