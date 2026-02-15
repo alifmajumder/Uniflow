@@ -48,9 +48,15 @@ const FileUpload: React.FC<FileUploadProps> = ({ onScheduleParsed }) => {
       setReviewSchedule(processedData);
       setIsReviewing(true);
       setStatus({ isProcessing: false, error: null, message: 'Success!' });
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      setStatus({ isProcessing: false, error: "Failed to process PDF. Ensure it is a valid routine file.", message: '' });
+      // Show the actual error message if available
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+      const displayError = errorMessage.includes("API Key") 
+        ? "API Key missing. Please check Vercel environment variables." 
+        : `Failed to process PDF: ${errorMessage}`;
+      
+      setStatus({ isProcessing: false, error: displayError, message: '' });
     }
   };
 
@@ -144,7 +150,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onScheduleParsed }) => {
       {status.error && (
         <div className="mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3 text-red-200 animate-in fade-in slide-in-from-top-2">
           <AlertCircle className="w-5 h-5 flex-shrink-0" />
-          <span className="text-sm">{status.error}</span>
+          <span className="text-sm break-words">{status.error}</span>
         </div>
       )}
 
