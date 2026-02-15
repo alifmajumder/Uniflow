@@ -1,12 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { LayoutDashboard, ListTodo, Settings as SettingsIcon, Bell, BellOff, Moon, X, Check, Calendar, Clock, AlertCircle, BellRing, Smartphone } from 'lucide-react';
+import { LayoutDashboard, ListTodo, Settings as SettingsIcon, Bell, BellOff, X, Clock, Calendar, AlertCircle, BellRing, Smartphone } from 'lucide-react';
 import FileUpload from './components/FileUpload';
 import ScheduleGrid from './components/ScheduleGrid';
 import TaskManager from './components/TaskManager';
 import Settings from './components/Settings';
-import { ToastContainer, ToastMessage } from './components/Toast';
 import { AppState, ClassSession, Task, AppPreferences } from './types';
-import { loadSchedule, loadTasks, saveSchedule, saveTasks, exportData, loadPreferences, savePreferences, applyTheme, isAppStandalone } from './utils/helpers';
+import { loadSchedule, loadTasks, saveSchedule, saveTasks, loadPreferences, savePreferences, applyTheme, isAppStandalone } from './utils/helpers';
 
 const TabButton = ({ active, onClick, icon: Icon, label }: any) => (
   <button
@@ -43,15 +42,9 @@ const App: React.FC = () => {
   const [permissionStatus, setPermissionStatus] = useState<NotificationPermission>('default');
   const [isStandalone, setIsStandalone] = useState(false);
   
-  // Install Prompt State
-  const [dismissedInstallPrompt, setDismissedInstallPrompt] = useState(false);
-
-  // Toast State
-  const [toasts, setToasts] = useState<ToastMessage[]>([]);
-
   const notifiedClassesRef = useRef<Set<string>>(new Set());
 
-  // Load data
+  // Initialize
   useEffect(() => {
     const prefs = loadPreferences();
     setState({
@@ -60,115 +53,95 @@ const App: React.FC = () => {
       preferences: prefs
     });
     
-    // Apply theme on initial load
     applyTheme(prefs.themeId);
     
-    // Check PWA status
-    setIsStandalone(isAppStandalone());
+    // Check Standalone Status (APK/PWA)
+    const standalone = isAppStandalone();
+    setIsStandalone(standalone);
     
-    // Check permission safely
-    if (typeof window !== 'undefined' && 'Notification' in window) {
+    // Register Service Worker for Mobile Notifications
+    if ('serviceWorker' in navigator) {
+      // Use absolute path to ensure correct scope resolution
+      navigator.serviceWorker.register('/sw.js')
+        .then(reg => console.log('Service Worker Registered'))
+        .catch(err => console.error('Service Worker Error', err));
+    }
+
+    // Check existing permission
+    if ('Notification' in window) {
       setPermissionStatus(Notification.permission);
-    } else {
-      // If API missing, we default to 'default' but handle it gracefully later
-      setPermissionStatus('default');
     }
   }, []);
 
   // Persistence
-  useEffect(() => {
-    saveSchedule(state.schedule);
-  }, [state.schedule]);
-
-  useEffect(() => {
-    saveTasks(state.tasks);
-  }, [state.tasks]);
-
-  useEffect(() => {
-    savePreferences(state.preferences);
+  useEffect(() => { saveSchedule(state.schedule); }, [state.schedule]);
+  useEffect(() => { saveTasks(state.tasks); }, [state.tasks]);
+  useEffect(() => { 
+    savePreferences(state.preferences); 
     applyTheme(state.preferences.themeId);
   }, [state.preferences]);
 
-  // --- Notification Logic ---
+  // Unified Notification Sender (Service Worker > Native)
+  const notifyUser = async (title: string, body: string) => {
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
 
-  const addToast = (title: string, message: string) => {
-    const id = Math.random().toString(36).substring(2, 9);
-    setToasts(prev => [...prev, { id, title, message }]);
-    // Auto dismiss after 5 seconds
-    setTimeout(() => removeToast(id), 5000);
-  };
-
-  const removeToast = (id: string) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
-  };
-
-  const notifyUser = (title: string, body: string) => {
-    // 1. Try Native System Notification
-    let nativeSent = false;
-    if ('Notification' in window && Notification.permission === 'granted') {
+    // Try Service Worker first (Best for Android/Mobile)
+    if ('serviceWorker' in navigator) {
       try {
-        // Simple native notification
-        new Notification(title, { body });
-        nativeSent = true;
+        const registration = await navigator.serviceWorker.ready;
+        await registration.showNotification(title, {
+          body,
+          icon: '/vite.svg', // Ensure you have an icon or remove this line
+          vibrate: [200, 100, 200],
+          badge: '/vite.svg'
+        } as any);
+        return;
       } catch (e) {
-        console.warn("System notification failed, falling back to toast", e);
+        console.warn("SW Notification failed, trying fallback", e);
       }
     }
 
-    // 2. Fallback to In-App Toast if native failed or not supported, OR if app is currently focused (to ensure visibility)
-    if (!nativeSent || document.visibilityState === 'visible') {
-      addToast(title, body);
+    // Fallback to standard API
+    try {
+      new Notification(title, { body });
+    } catch (e) {
+      console.error("Notification failed", e);
     }
   };
 
-  // Request Permission Explicitly
+  // Request Permission
   const requestPermission = async () => {
-    // Case 1: Browser/WebView does not support Notification API
     if (!('Notification' in window)) {
-      // We simulate 'granted' so the switch turns on and internal logic works
-      // But we inform the user via toast
-      updatePreferences({ enableNotifications: true });
-      // We artificially set it to granted to unlock the UI
-      setPermissionStatus('granted'); 
-      addToast("In-App Notifications Enabled", "System notifications are not supported on this device, but you will receive in-app alerts.");
+      console.warn("Notifications not supported in this environment");
       return;
     }
 
-    // Case 2: Standard Flow
     try {
       const result = await Notification.requestPermission();
       setPermissionStatus(result);
 
       if (result === 'granted') {
-        notifyUser("UniFlow Notifications Enabled", "You will now receive alerts for classes and tasks!");
+        notifyUser("Notifications Enabled", "You will now receive alerts for your schedule.");
         updatePreferences({ enableNotifications: true });
-      } else {
-        alert("Permission was denied. Please enable it in your device settings.");
       }
     } catch (e) {
-      console.error("Permission request failed", e);
-      // Fallback behavior on error
-      updatePreferences({ enableNotifications: true });
-      setPermissionStatus('granted'); 
-      addToast("Notifications Enabled", "Using in-app alerts due to system restriction.");
+      console.error("Permission request error", e);
     }
   };
-  
+
   const sendTestNotification = () => {
-    notifyUser("Test Notification", "This is a test to confirm notifications are working.");
+    notifyUser("Test Notification", "This is a test alert from UniFlow.");
   };
 
-  // Reminder Interval
+  // Reminder Logic
   useEffect(() => {
-    // If master switch is off, do nothing. 
-    // Note: We run this even if permissionStatus != 'granted' if the API is missing, 
-    // because we want In-App toasts to work.
     if (!state.preferences.enableNotifications) return;
 
     const checkReminders = () => {
       const now = new Date();
       
-      // --- Class Schedule Reminders (30 mins before) ---
+      // Class Reminders
       if (state.preferences.notificationSettings.classReminders) {
           const currentDay = now.toLocaleDateString('en-US', { weekday: 'long' });
           const currentHours = now.getHours();
@@ -184,7 +157,6 @@ const App: React.FC = () => {
 
             const notificationId = `class-${session.id}-${now.toDateString()}`;
 
-            // Notify 30 minutes before class
             if (diff === 30 && !notifiedClassesRef.current.has(notificationId)) {
               notifyUser(`Class Reminder: ${session.courseCode}`, `${session.courseName} starts in 30 minutes at ${session.room}.`);
               notifiedClassesRef.current.add(notificationId);
@@ -192,7 +164,7 @@ const App: React.FC = () => {
           });
       }
 
-      // --- Task Reminders ---
+      // Task Reminders
       state.tasks.forEach(task => {
         if (!task.deadline || task.completed) return;
 
@@ -201,7 +173,6 @@ const App: React.FC = () => {
 
         const checkNotify = (time: Date, idSuffix: string, title: string, body: string) => {
            const diff = now.getTime() - time.getTime();
-           // Check if within the last minute (0 to 60000ms) to ensure we trigger slightly after the exact second
            if (diff >= 0 && diff < 60000) {
              const id = `${notificationBaseId}-${idSuffix}`;
              if (!notifiedClassesRef.current.has(id)) {
@@ -211,7 +182,6 @@ const App: React.FC = () => {
            }
         };
 
-        // 1. One day before at 12:00 AM
         if (state.preferences.notificationSettings.taskDayBefore) {
             const dayBefore = new Date(deadline);
             dayBefore.setDate(dayBefore.getDate() - 1);
@@ -219,14 +189,12 @@ const App: React.FC = () => {
             checkNotify(dayBefore, '24h', `Upcoming Deadline: ${task.courseCode}`, `${task.title} is due tomorrow.`);
         }
         
-        // 2. Day of at 12:00 AM
         if (state.preferences.notificationSettings.taskDeadline) {
             const dayOf = new Date(deadline);
             dayOf.setHours(0, 0, 0, 0);
             checkNotify(dayOf, 'today', `Deadline Today: ${task.courseCode}`, `${task.title} is due today.`);
         }
 
-        // 3. One hour before deadline
         if (state.preferences.notificationSettings.taskHourBefore) {
             const hourBefore = new Date(deadline.getTime() - 60 * 60 * 1000);
             checkNotify(hourBefore, '1h', `Deadline in 1 Hour: ${task.courseCode}`, `${task.title} is due soon!`);
@@ -238,43 +206,14 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [state.schedule, state.tasks, state.preferences]);
 
-  const updateSchedule = (newSchedule: ClassSession[]) => {
-    setState(prev => ({ ...prev, schedule: newSchedule }));
-  };
-
-  const handleAddClass = (newClass: ClassSession) => {
-    setState(prev => ({ ...prev, schedule: [...prev.schedule, newClass] }));
-  };
-
-  const handleDeleteClass = (id: string) => {
-    setState(prev => ({
-      ...prev,
-      schedule: prev.schedule.filter(s => s.id !== id)
-    }));
-  };
-
-  const handleAddTask = (task: Task) => {
-    setState(prev => ({ ...prev, tasks: [...prev.tasks, task] }));
-  };
-
-  const handleUpdateTask = (updatedTask: Task) => {
-    setState(prev => ({
-      ...prev,
-      tasks: prev.tasks.map(t => t.id === updatedTask.id ? updatedTask : t)
-    }));
-  };
-
-  const handleDeleteTask = (id: string) => {
-    setState(prev => ({
-      ...prev,
-      tasks: prev.tasks.filter(t => t.id !== id)
-    }));
-  };
-
-  const updatePreferences = (newPrefs: Partial<AppPreferences>) => {
-    setState(prev => ({ ...prev, preferences: { ...prev.preferences, ...newPrefs } }));
-  };
-
+  // State Helpers
+  const updateSchedule = (newSchedule: ClassSession[]) => setState(prev => ({ ...prev, schedule: newSchedule }));
+  const handleAddClass = (newClass: ClassSession) => setState(prev => ({ ...prev, schedule: [...prev.schedule, newClass] }));
+  const handleDeleteClass = (id: string) => setState(prev => ({ ...prev, schedule: prev.schedule.filter(s => s.id !== id) }));
+  const handleAddTask = (task: Task) => setState(prev => ({ ...prev, tasks: [...prev.tasks, task] }));
+  const handleUpdateTask = (updatedTask: Task) => setState(prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === updatedTask.id ? updatedTask : t) }));
+  const handleDeleteTask = (id: string) => setState(prev => ({ ...prev, tasks: prev.tasks.filter(t => t.id !== id) }));
+  const updatePreferences = (newPrefs: Partial<AppPreferences>) => setState(prev => ({ ...prev, preferences: { ...prev.preferences, ...newPrefs } }));
   const updateNotificationSettings = (key: keyof AppPreferences['notificationSettings']) => {
       setState(prev => ({
           ...prev,
@@ -289,7 +228,7 @@ const App: React.FC = () => {
   };
 
   const handleMasterToggle = () => {
-    if (!state.preferences.enableNotifications) {
+    if (!state.preferences.enableNotifications && permissionStatus !== 'granted') {
         requestPermission();
     } else {
         updatePreferences({ enableNotifications: !state.preferences.enableNotifications });
@@ -297,12 +236,7 @@ const App: React.FC = () => {
   };
 
   const handleReset = () => {
-    const defaultSettings = {
-        classReminders: true,
-        taskDayBefore: true,
-        taskDeadline: true,
-        taskHourBefore: true
-    };
+    const defaultSettings = { classReminders: true, taskDayBefore: true, taskDeadline: true, taskHourBefore: true };
     setState({ 
       schedule: [], 
       tasks: [], 
@@ -313,19 +247,20 @@ const App: React.FC = () => {
     setActiveTab('schedule');
   };
 
-  // Determine if we should show the install prompt
-  // If dismissed or if standalone, don't show.
-  const showInstallPrompt = !dismissedInstallPrompt && !isStandalone && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  
-  // Show permission banner if app is installed (or dismissed prompt) and permission is default
-  const showPermissionBanner = (isStandalone || dismissedInstallPrompt) && permissionStatus === 'default' && 'Notification' in window;
+  // Logic: Only show permission prompt if:
+  // 1. It is a standalone app (APK/PWA)
+  // 2. Permission is not yet granted
+  // 3. Notification API exists
+  const showPermissionBanner = isStandalone && permissionStatus === 'default' && 'Notification' in window;
+
+  // Logic: Show install prompt only if NOT standalone (browser)
+  // But user asked to remove "In app alert". I'll keep this as a passive banner, 
+  // but ensure it doesn't show if isStandalone is true (which handles the APK case via helpers.ts)
+  const showInstallPrompt = !isStandalone && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
   return (
     <div className="h-screen bg-slate-950 text-slate-100 flex flex-col font-sans transition-colors duration-500 overflow-hidden">
       
-      {/* Toast Container */}
-      <ToastContainer toasts={toasts} onDismiss={removeToast} />
-
       {/* Navbar */}
       <nav className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50 flex-none h-20">
         <div className="max-w-7xl mx-auto px-4 h-full flex items-center justify-between">
@@ -343,13 +278,12 @@ const App: React.FC = () => {
             <button
               onClick={() => setShowNotificationSettings(true)}
               className={`p-2 rounded-full transition-all duration-300 relative group ${
-                state.preferences.enableNotifications
+                state.preferences.enableNotifications && permissionStatus === 'granted'
                   ? 'text-primary-400 bg-primary-500/10 hover:bg-primary-500/20' 
                   : 'text-slate-500 hover:text-slate-300'
               }`}
-              title="Notification Settings"
             >
-              {state.preferences.enableNotifications ? (
+              {state.preferences.enableNotifications && permissionStatus === 'granted' ? (
                  <>
                    <Bell className="w-5 h-5" />
                    <span className="absolute top-2 right-2.5 w-1.5 h-1.5 bg-primary-500 rounded-full animate-pulse"></span>
@@ -361,7 +295,6 @@ const App: React.FC = () => {
             <button 
               onClick={() => setActiveTab('settings')}
               className={`p-2 rounded-full transition-colors ${activeTab === 'settings' ? 'text-primary-400 bg-slate-800' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
-              title="Settings"
             >
               <SettingsIcon className="w-5 h-5" />
             </button>
@@ -372,7 +305,7 @@ const App: React.FC = () => {
       {/* Main Content Area */}
       <main className={`flex-1 max-w-7xl mx-auto w-full p-4 md:p-6 pb-28 ${activeTab === 'tasks' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
         
-        {/* Permission Banner */}
+        {/* Permission Banner (Only shown if Installed/Standalone) */}
         {showPermissionBanner && (
           <div className="mb-6 p-4 bg-primary-600 rounded-xl shadow-lg shadow-primary-900/50 flex items-center justify-between animate-in slide-in-from-top-4">
              <div className="flex items-center gap-3">
@@ -393,33 +326,22 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Install Prompt (Dismissible) */}
+        {/* Install Prompt (Only shown if NOT Installed/Standalone) */}
         {showInstallPrompt && (
-           <div className="mb-6 p-4 bg-slate-800 rounded-xl border border-slate-700 flex items-start gap-4 animate-in slide-in-from-top-4 relative group">
-              <button 
-                onClick={() => setDismissedInstallPrompt(true)}
-                className="absolute top-2 right-2 p-1 text-slate-500 hover:text-white transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
+           <div className="mb-6 p-4 bg-slate-800 rounded-xl border border-slate-700 flex items-start gap-4 animate-in slide-in-from-top-4">
               <div className="p-2 bg-slate-700 rounded-lg mt-1">
                  <Smartphone className="w-6 h-6 text-slate-300" />
               </div>
               <div className="flex-1 pr-6">
-                 <h3 className="font-bold text-slate-200">Install App to Enable Alerts</h3>
-                 <p className="text-slate-400 text-xs mt-1 mb-2">
-                    For the best experience, add this app to your home screen.
+                 <h3 className="font-bold text-slate-200">Install App</h3>
+                 <p className="text-slate-400 text-xs mt-1">
+                    Notifications work best when installed on your device.
                  </p>
-                 <button 
-                    onClick={() => setDismissedInstallPrompt(true)} 
-                    className="text-xs font-bold text-primary-400 hover:text-primary-300"
-                 >
-                    I already have it / Dismiss
-                 </button>
               </div>
            </div>
         )}
 
+        {/* Views */}
         {activeTab === 'schedule' && (
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {state.schedule.length === 0 ? (
@@ -429,8 +351,7 @@ const App: React.FC = () => {
                     Your Semester, Organized.
                   </h2>
                   <p className="text-slate-400 text-lg">
-                    Upload your university PDF routine. We'll automatically extract your classes, 
-                    rooms, and times.
+                    Upload your university PDF routine.
                   </p>
                 </div>
                 <FileUpload onScheduleParsed={updateSchedule} />
@@ -471,21 +392,11 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Bottom Navigation Dock */}
+      {/* Bottom Nav */}
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-lg px-4 pointer-events-none">
         <nav className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/50 p-1.5 rounded-2xl shadow-2xl flex items-center justify-between gap-1 pointer-events-auto">
-          <TabButton 
-            active={activeTab === 'schedule'} 
-            onClick={() => setActiveTab('schedule')} 
-            icon={LayoutDashboard} 
-            label="Routine" 
-          />
-          <TabButton 
-            active={activeTab === 'tasks'} 
-            onClick={() => setActiveTab('tasks')} 
-            icon={ListTodo} 
-            label="Tasks" 
-          />
+          <TabButton active={activeTab === 'schedule'} onClick={() => setActiveTab('schedule')} icon={LayoutDashboard} label="Routine" />
+          <TabButton active={activeTab === 'tasks'} onClick={() => setActiveTab('tasks')} icon={ListTodo} label="Tasks" />
         </nav>
       </div>
 
@@ -504,13 +415,10 @@ const App: React.FC = () => {
               </div>
               
               <div className="p-6 space-y-6">
-                  {/* Master Switch */}
                   <div className="flex items-center justify-between p-4 bg-primary-500/10 border border-primary-500/20 rounded-xl">
                       <div className="flex flex-col">
                           <span className="font-bold text-white text-sm">Enable Notifications</span>
-                          <span className="text-xs text-primary-200/70">
-                            {('Notification' in window) ? 'System & In-App Alerts' : 'In-App Alerts Only (System Unsupported)'}
-                          </span>
+                          <span className="text-xs text-primary-200/70">System Alerts</span>
                       </div>
                       <button 
                         onClick={handleMasterToggle}
@@ -520,11 +428,8 @@ const App: React.FC = () => {
                       </button>
                   </div>
 
-                  {state.preferences.enableNotifications && (
-                      <button 
-                          onClick={sendTestNotification}
-                          className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium transition-colors border border-slate-700"
-                      >
+                  {state.preferences.enableNotifications && permissionStatus === 'granted' && (
+                      <button onClick={sendTestNotification} className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium border border-slate-700">
                           Send Test Notification
                       </button>
                   )}
@@ -532,48 +437,33 @@ const App: React.FC = () => {
                   {permissionStatus === 'denied' && (
                      <div className="p-3 bg-red-500/20 border border-red-500/30 rounded-lg text-xs text-red-200 flex gap-2">
                         <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                        <span>Permission denied in settings. Notifications will only appear inside the app.</span>
+                        <span>Permission denied in settings.</span>
                      </div>
                   )}
 
-                  <div className={`space-y-1 transition-opacity duration-300 ${!state.preferences.enableNotifications ? 'opacity-50 pointer-events-none' : ''}`}>
-                      <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Granular Controls</h4>
+                  {/* Settings toggles... */}
+                  <div className={`space-y-1 ${!state.preferences.enableNotifications ? 'opacity-50 pointer-events-none' : ''}`}>
+                      <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Controls</h4>
                       
                       {/* Class Reminders */}
                       <div className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-800/50 transition-colors">
                           <div className="flex items-center gap-3">
                               <div className="p-2 bg-blue-500/20 text-blue-400 rounded-lg"><Clock className="w-4 h-4" /></div>
-                              <div>
-                                  <p className="text-sm font-medium text-slate-200">Class Reminders</p>
-                                  <p className="text-xs text-slate-400">30 minutes before start</p>
-                              </div>
+                              <div><p className="text-sm font-medium text-slate-200">Class Reminders</p><p className="text-xs text-slate-400">30 mins before</p></div>
                           </div>
-                          <button 
-                             onClick={() => updateNotificationSettings('classReminders')}
-                             className={`w-10 h-5 rounded-full p-1 transition-colors duration-200 ${state.preferences.notificationSettings.classReminders ? 'bg-blue-600' : 'bg-slate-700'}`}
-                          >
-                             <div className={`w-3 h-3 bg-white rounded-full transition-transform duration-200 ${state.preferences.notificationSettings.classReminders ? 'translate-x-5' : 'translate-x-0'}`} />
-                          </button>
+                          <button onClick={() => updateNotificationSettings('classReminders')} className={`w-10 h-5 rounded-full p-1 transition-colors duration-200 ${state.preferences.notificationSettings.classReminders ? 'bg-blue-600' : 'bg-slate-700'}`}><div className={`w-3 h-3 bg-white rounded-full transition-transform duration-200 ${state.preferences.notificationSettings.classReminders ? 'translate-x-5' : 'translate-x-0'}`} /></button>
                       </div>
 
-                      {/* Task: 1 Day Before */}
-                      <div className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-800/50 transition-colors">
+                       {/* Task: 1 Day Before */}
+                       <div className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-800/50 transition-colors">
                           <div className="flex items-center gap-3">
                               <div className="p-2 bg-purple-500/20 text-purple-400 rounded-lg"><Calendar className="w-4 h-4" /></div>
-                              <div>
-                                  <p className="text-sm font-medium text-slate-200">Task: 1 Day Before</p>
-                                  <p className="text-xs text-slate-400">Alert 24h before deadline</p>
-                              </div>
+                              <div><p className="text-sm font-medium text-slate-200">Task: 1 Day Before</p><p className="text-xs text-slate-400">Alert 24h before deadline</p></div>
                           </div>
-                          <button 
-                             onClick={() => updateNotificationSettings('taskDayBefore')}
-                             className={`w-10 h-5 rounded-full p-1 transition-colors duration-200 ${state.preferences.notificationSettings.taskDayBefore ? 'bg-purple-600' : 'bg-slate-700'}`}
-                          >
-                             <div className={`w-3 h-3 bg-white rounded-full transition-transform duration-200 ${state.preferences.notificationSettings.taskDayBefore ? 'translate-x-5' : 'translate-x-0'}`} />
-                          </button>
+                          <button onClick={() => updateNotificationSettings('taskDayBefore')} className={`w-10 h-5 rounded-full p-1 transition-colors duration-200 ${state.preferences.notificationSettings.taskDayBefore ? 'bg-purple-600' : 'bg-slate-700'}`}><div className={`w-3 h-3 bg-white rounded-full transition-transform duration-200 ${state.preferences.notificationSettings.taskDayBefore ? 'translate-x-5' : 'translate-x-0'}`} /></button>
                       </div>
 
-                      {/* Task: Deadline Day */}
+                      {/* Task: On Deadline Day */}
                       <div className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-800/50 transition-colors">
                           <div className="flex items-center gap-3">
                               <div className="p-2 bg-orange-500/20 text-orange-400 rounded-lg"><AlertCircle className="w-4 h-4" /></div>
