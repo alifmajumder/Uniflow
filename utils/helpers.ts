@@ -67,13 +67,6 @@ export const loadPreferences = (): AppPreferences => {
   const data = localStorage.getItem(STORAGE_KEY_PREFS);
   const defaults: AppPreferences = {
     themeId: 'ocean',
-    enableNotifications: true,
-    notificationSettings: {
-        classReminders: true,
-        taskDayBefore: true,
-        taskDeadline: true,
-        taskHourBefore: true
-    },
     showQuotes: true
   };
   
@@ -81,12 +74,7 @@ export const loadPreferences = (): AppPreferences => {
       const parsed = JSON.parse(data);
       return {
           ...defaults,
-          ...parsed,
-          // Ensure nested object exists if loading from old data
-          notificationSettings: {
-              ...defaults.notificationSettings,
-              ...(parsed.notificationSettings || {})
-          }
+          ...parsed
       };
   }
   return defaults;
@@ -116,21 +104,12 @@ export const exportData = (schedule: ClassSession[], tasks: Task[]) => {
   URL.revokeObjectURL(url);
 };
 
-// Check if app is running in standalone mode (PWA, TWA, or WebView)
 export const isAppStandalone = (): boolean => {
-  // 1. Standard PWA display modes
   const mqStandalone = window.matchMedia('(display-mode: standalone)').matches;
   const mqFullscreen = window.matchMedia('(display-mode: fullscreen)').matches;
   const mqMinimalUi = window.matchMedia('(display-mode: minimal-ui)').matches;
-  
-  // 2. iOS Safari standalone
   const isIOSStandalone = (window.navigator as any).standalone === true;
-  
-  // 3. Android TWA (Trusted Web Activity) often has this referrer
   const isTWA = document.referrer.includes('android-app://');
-  
-  // 4. Android WebView detection via User Agent (Look for 'wv' or 'Version/* Chrome/*')
-  // Many wrappers inject 'wv' into the UA string.
   const userAgent = navigator.userAgent || '';
   const isAndroidWebView = /wv|WebView/i.test(userAgent) && /Android/i.test(userAgent);
 

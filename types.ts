@@ -36,17 +36,8 @@ export interface AppState {
   preferences: AppPreferences;
 }
 
-export interface NotificationSettings {
-  classReminders: boolean;   // 30 mins before
-  taskDayBefore: boolean;    // 1 day before
-  taskDeadline: boolean;     // 12am on deadline day
-  taskHourBefore: boolean;   // 1 hour before
-}
-
 export interface AppPreferences {
   themeId: string;
-  enableNotifications: boolean;
-  notificationSettings: NotificationSettings;
   showQuotes: boolean;
 }
 

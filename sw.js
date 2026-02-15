@@ -1,1 +1,1 @@
-// Moved to public/sw.js for correct scoping
+// Service Worker Disabled
