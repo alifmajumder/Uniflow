@@ -232,11 +232,11 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans transition-colors duration-500">
+    <div className="h-screen bg-slate-950 text-slate-100 flex flex-col font-sans transition-colors duration-500 overflow-hidden">
       
-      {/* Navbar - Simplified Top Bar */}
-      <nav className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 h-20 flex items-center justify-between">
+      {/* Navbar */}
+      <nav className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50 flex-none h-20">
+        <div className="max-w-7xl mx-auto px-4 h-full flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-tr from-primary-600 to-accent-600 rounded-xl flex items-center justify-center shadow-lg shadow-primary-500/20">
               <span className="text-xl font-bold text-white">U</span>
@@ -277,8 +277,10 @@ const App: React.FC = () => {
         </div>
       </nav>
 
-      {/* Main Content */}
-      <main className="flex-1 max-w-7xl mx-auto w-full p-4 md:p-6 pb-28 overflow-hidden">
+      {/* Main Content Area */}
+      {/* Logic: Tasks handles its own scrolling (overflow-hidden on parent). Routine/Settings scroll the page (overflow-y-auto on parent). */}
+      <main className={`flex-1 max-w-7xl mx-auto w-full p-4 md:p-6 pb-28 ${activeTab === 'tasks' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+        
         {activeTab === 'schedule' && (
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {state.schedule.length === 0 ? (
@@ -348,7 +350,7 @@ const App: React.FC = () => {
         </nav>
       </div>
 
-      {/* Notification Settings Modal (Top Right) */}
+      {/* Notification Settings Modal */}
       {showNotificationSettings && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
            <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
